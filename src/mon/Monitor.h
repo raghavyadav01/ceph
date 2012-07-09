@@ -46,6 +46,7 @@
 #include "mon/MonitorDBStore.h"
 
 #include <memory>
+#include <tr1/memory>
 
 
 #define CEPH_MON_PROTOCOL     9 /* cluster internal */
@@ -85,6 +86,7 @@ class AdminSocketHook;
 
 class MMonGetMap;
 class MMonGetVersion;
+class MMonSync;
 class MMonProbe;
 class MMonSubscribe;
 class MAuthRotating;
@@ -139,6 +141,7 @@ private:
   enum {
     STATE_PROBING = 1,
     STATE_SLURPING,
+    STATE_SYNCHRONIZING,
     STATE_ELECTING,
     STATE_LEADER,
     STATE_PEON,
@@ -151,6 +154,7 @@ public:
     switch (s) {
     case STATE_PROBING: return "probing";
     case STATE_SLURPING: return "slurping";
+    case STATE_SYNCHRONIZING: return "synchronizing";
     case STATE_ELECTING: return "electing";
     case STATE_LEADER: return "leader";
     case STATE_PEON: return "peon";
@@ -163,6 +167,7 @@ public:
 
   bool is_probing() const { return state == STATE_PROBING; }
   bool is_slurping() const { return state == STATE_SLURPING; }
+  bool is_synchronizing() const { return state == STATE_SYNCHRONIZING; }
   bool is_electing() const { return state == STATE_ELECTING; }
   bool is_leader() const { return state == STATE_LEADER; }
   bool is_peon() const { return state == STATE_PEON; }
@@ -183,6 +188,231 @@ private:
   set<string> outside_quorum;
   entity_inst_t slurp_source;
   map<string,version_t> slurp_versions;
+
+  /**
+   * @defgroup Synchronization
+   * @{
+   */
+  set<string> get_sync_targets_names();
+  void handle_sync(MMonSync *m);
+  void reset_sync();
+  /**
+   * @defgroup Leader-specific
+   * @{
+   */
+  Mutex trim_lock;
+  map<entity_inst_t, Context*> trim_timeouts;
+  Context *trim_enable_timer;
+
+  struct C_TrimTimeout : public Context {
+    Monitor *mon;
+    entity_inst_t entity;
+
+    C_TrimTimeout(Monitor *m, entity_inst_t& entity)
+      : mon(m), entity(entity) { }
+    void finish(int r) {
+      mon->sync_finish(entity);
+    }
+  };
+
+  struct C_TrimEnable : public Context {
+    Monitor *mon;
+
+    C_TrimEnable(Monitor *m) : mon(m) { }
+    void finish(int r) {
+      Mutex::Locker(mon->trim_lock);
+      if (!mon->trim_timeouts.size())
+	mon->paxos->trim_enable();
+      mon->trim_enable_timer = NULL;
+    }
+  };
+
+  void sync_send_heartbeat(entity_inst_t &other, bool reply = false);
+  void handle_sync_start(MMonSync *m);
+  void handle_sync_heartbeat(MMonSync *m);
+  void handle_sync_finish(MMonSync *m);
+  void sync_finish(entity_inst_t &entity);
+  /**
+   * @} // Leader-specific
+   */
+  /**
+   * @defgroup Synchronization Provider-specific
+   * @{
+   */
+  struct SyncEntityImpl {
+
+    enum {
+      STATE_NONE   = 0,
+      STATE_WHOLE  = 1,
+      STATE_PAXOS  = 2
+    };
+
+    entity_inst_t entity;
+    Monitor *mon;
+    version_t version;
+    Context *timeout;
+    pair<string,string> last_received_key;
+
+    int sync_state;
+    MonitorDBStore::Synchronizer synchronizer;
+
+    SyncEntityImpl(entity_inst_t &entity, Monitor *mon)
+      : entity(entity),
+	mon(mon),
+	version(0),
+	timeout(NULL),
+	sync_state(STATE_NONE)
+    { }
+
+    string get_state() {
+      switch (sync_state) {
+	case STATE_NONE: return "none";
+	case STATE_WHOLE: return "whole";
+	case STATE_PAXOS: return "paxos";
+	default: return "unknown";
+      }
+    }
+
+    void set_timeout(Context *event, double fire_after) {
+      cancel_timeout();
+      timeout = event;
+      mon->timer.add_event_after(fire_after, timeout);
+    }
+
+    void cancel_timeout() {
+      if (timeout)
+	mon->timer.cancel_event(timeout);
+      timeout = NULL;
+    }
+
+    void sync_init() {
+      sync_state = STATE_WHOLE;
+      set<string> sync_targets = mon->get_sync_targets_names();
+      synchronizer = mon->store->get_synchronizer(last_received_key,
+						  sync_targets);
+    }
+
+    void sync_update() {
+      assert(sync_state != STATE_NONE);
+      assert(synchronizer.use_count() != 0);
+
+      if (sync_state == STATE_WHOLE) {
+	if (synchronizer->has_next_chunk())
+	  return;
+
+	sync_state = STATE_PAXOS;
+	string prefix("paxos");
+	synchronizer = mon->store->get_synchronizer(prefix);
+      } else {
+	assert(synchronizer->has_next_chunk());
+      }
+    }
+  };
+  typedef std::tr1::shared_ptr< SyncEntityImpl > SyncEntity;
+  SyncEntity get_sync_entity(entity_inst_t &entity, Monitor *mon) {
+    return std::tr1::shared_ptr<SyncEntityImpl>(
+	new SyncEntityImpl(entity, mon));
+  }
+
+  struct C_SyncTimeout : public Context {
+    Monitor *mon;
+    entity_inst_t entity;
+
+    C_SyncTimeout(Monitor *mon, entity_inst_t &entity)
+      : mon(mon), entity(entity)
+    { }
+
+    void finish(int r) {
+      assert(0);
+    }
+  };
+
+  map<entity_inst_t, SyncEntity> sync_entities;
+
+  void handle_sync_start_chunks(MMonSync *m);
+  void handle_sync_heartbeat_reply(MMonSync *m);
+  void handle_sync_chunk_reply(MMonSync *m);
+  void sync_send_chunks(SyncEntity sync, pair<string,string> &last_key);
+  void sync_timeout(entity_inst_t &entity);
+
+  /**
+   * @} // Synchronization Provider-specific
+   */
+  /**
+   * @defgroup Synchronization Requester-specific
+   * @{
+   */
+  struct C_SyncStartTimeout : public Context {
+    Monitor *mon;
+    entity_inst_t entity;
+
+    C_SyncStartTimeout(Monitor *mon, entity_inst_t &entity)
+      : mon(mon), entity(entity)
+    { }
+
+    void finish(int r) {
+      assert(0);
+    }
+  };
+
+  struct C_SyncStartRetry : public Context {
+    Monitor *mon;
+    entity_inst_t entity;
+
+    C_SyncStartRetry(Monitor *mon, entity_inst_t &entity)
+      : mon(mon), entity(entity)
+    { }
+
+    void finish(int r) {
+      mon->sync_start(entity);
+    }
+  };
+
+  /**
+   * We use heartbeats to check if both the Leader and the Synchronization
+   * Requester are both still alive, so we can determine if we should continue
+   * with the synchronization process, granted that trim is disabled.
+   */
+  struct C_HeartbeatTimeout : public Context {
+    Monitor *mon;
+    entity_inst_t entity;
+
+    C_HeartbeatTimeout(Monitor *mon, entity_inst_t &entity)
+      : mon(mon), entity(entity)
+    { }
+
+    void finish(int r) {
+      assert(0);
+    }
+  };
+
+  struct C_SyncFinishReplyTimeout : public Context {
+    Monitor *mon;
+
+    C_SyncFinishReplyTimeout(Monitor *mon)
+      : mon(mon)
+    { }
+
+    void finish(int r) {
+      assert(0 == "FinishReplyTimeout");
+    }
+  };
+
+  SyncEntity sync_leader;
+  SyncEntity sync_provider;
+
+  void sync_start(entity_inst_t &entity);
+  void handle_sync_start_reply(MMonSync *m);
+  void handle_sync_chunk(MMonSync *m);
+  void handle_sync_finish_reply(MMonSync *m);
+  void sync_stop();
+  void sync_abort();
+  /**
+   * @} // Synchronization Requester-specific
+   */ 
+  /**
+   * @} // Synchronization
+   */
 
   list<Context*> waitfor_quorum;
   list<Context*> maybe_wait_for_quorum;
@@ -295,6 +525,9 @@ public:
   void reply_command(MMonCommand *m, int rc, const string &rs, version_t version);
   void reply_command(MMonCommand *m, int rc, const string &rs, bufferlist& rdata, version_t version);
 
+  /**
+   * Handle Synchronization-related messages.
+   */
   void handle_probe(MMonProbe *m);
   /**
    * Handle a Probe Operation, replying with our name, quorum and known versions.
@@ -407,6 +640,7 @@ public:
   ~Monitor();
 
   int init();
+  void init_paxos();
   void shutdown();
   void tick();
 
