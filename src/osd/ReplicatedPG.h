@@ -778,7 +778,10 @@ protected:
 
 
   // -- scrub --
-  virtual int _scrub(ScrubMap& map, int* errors, int* fixed);
+  virtual void _scrub(ScrubMap& map);
+  virtual void _scrub_clear_state();
+  virtual void _scrub_finish();
+  object_stat_collection_t scrub_cstat;
 
   void apply_and_flush_repops(bool requeue);
 
