@@ -88,6 +88,7 @@ PG::PG(OSDService *o, OSDMapRef curmap,
   scrub_subset_last_update(eversion_t()),
   scrub_errors(0),
   scrub_fixed(0),
+  active_pushes(0),
   recovery_state(this)
 {
 }
@@ -3346,6 +3347,11 @@ void PG::classic_scrub()
  * |      SCRUB_NEW_CHUNK     |   |   |
  * |__________________________|   |   |
  *              |                 |   |
+ *   ___________v_____________    |   |
+ *  |                         |   |   |
+ *  |    SCRUB_WAIT_PUSHES    |   |   |
+ *  |_________________________|   |   |
+ *              |                 |   |
  *  ____________v_____________    |   |
  * |                          |   |   |
  * |  SCRUB_WAIT_LAST_UPDATE  |   |   |
@@ -3486,8 +3492,17 @@ void PG::chunky_scrub() {
           ++scrub_waiting_on;
         }
 
-        scrub_state = SCRUB_WAIT_LAST_UPDATE;
+        scrub_state = SCRUB_WAIT_PUSHES;
 
+        break;
+
+      case SCRUB_WAIT_PUSHES:
+        if (active_pushes == 0) {
+          scrub_state = SCRUB_WAIT_LAST_UPDATE;
+        } else {
+          dout(15) << "wait for pushes to apply" << dendl;
+          done = true;
+        }
         break;
 
       case SCRUB_WAIT_LAST_UPDATE:

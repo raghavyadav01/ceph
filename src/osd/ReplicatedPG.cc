@@ -5040,7 +5040,7 @@ void ReplicatedPG::handle_push(OpRequestRef op)
   bool complete = m->recovery_progress.data_complete &&
     m->recovery_progress.omap_complete;
   ObjectStore::Transaction *t = new ObjectStore::Transaction;
-  Context *onreadable = new ObjectStore::C_DeleteTransaction(t);
+  Context *onreadable = new C_OSD_AppliedRecoveredObjectReplica(this, t);
   Context *onreadable_sync = 0;
   submit_push_data(m->recovery_info,
 		   first,
@@ -5349,6 +5349,34 @@ void ReplicatedPG::_applied_recovered_object(ObjectStore::Transaction *t, Object
   lock();
   dout(10) << "_applied_recovered_object " << *obc << dendl;
   put_object_context(obc);
+
+  assert(active_pushes >= 1);
+  --active_pushes;
+
+  // requeue an active chunky scrub waiting on recovery ops
+  if (active_pushes == 0 && is_chunky_scrub_active()) {
+    osd->scrub_wq.queue(this);
+  }
+
+  unlock();
+  delete t;
+}
+
+void ReplicatedPG::_applied_recovered_object_replica(ObjectStore::Transaction *t)
+{
+  lock();
+  dout(10) << "_applied_recovered_object_replica" << dendl;
+
+  assert(active_pushes >= 1);
+  --active_pushes;
+
+  // requeue an active chunky scrub waiting on recovery ops
+  if (active_pushes == 0 &&
+      active_rep_scrub && active_rep_scrub->is_chunky()) {
+    osd->rep_scrub_wq.queue(active_rep_scrub);
+    active_rep_scrub = 0;
+  }
+
   unlock();
   delete t;
 }
@@ -5438,6 +5466,10 @@ void ReplicatedPG::trim_pushed_data(
 void ReplicatedPG::sub_op_push(OpRequestRef op)
 {
   op->mark_started();
+
+  // keep track of active pushes for scrub
+  ++active_pushes;
+
   if (is_primary()) {
     handle_pull_response(op);
   } else {

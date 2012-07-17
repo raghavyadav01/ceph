@@ -762,9 +762,12 @@ public:
   int scrub_errors;
   int scrub_fixed;
 
+  int active_pushes;
+
   enum ScrubState {
     SCRUB_INACTIVE,
     SCRUB_NEW_CHUNK,
+    SCRUB_WAIT_PUSHES,
     SCRUB_WAIT_LAST_UPDATE,
     SCRUB_BUILD_MAP,
     SCRUB_WAIT_REPLICAS,
@@ -778,6 +781,7 @@ public:
     {
       case SCRUB_INACTIVE: ret = "SCRUB_INACTIVE"; break;
       case SCRUB_NEW_CHUNK: ret = "SCRUB_NEW_CHUNK"; break;
+      case SCRUB_WAIT_PUSHES: ret = "SCRUB_WAIT_PUSHES"; break;
       case SCRUB_WAIT_LAST_UPDATE: ret = "SCRUB_WAIT_LAST_UPDATE"; break;
       case SCRUB_BUILD_MAP: ret = "SCRUB_BUILD_MAP"; break;
       case SCRUB_WAIT_REPLICAS: ret = "SCRUB_WAIT_REPLICAS"; break;
