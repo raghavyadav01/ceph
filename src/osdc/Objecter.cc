@@ -257,9 +257,6 @@ void Objecter::send_linger(LingerOp *info)
 		 info->pobjver);
   o->snapid = info->snap;
 
-  // do not resend this; we will send a new op to reregister
-  o->should_resend = false;
-
   if (info->session) {
     int r = recalc_op_target(o);
     if (r == RECALC_OP_TARGET_POOL_DNE) {

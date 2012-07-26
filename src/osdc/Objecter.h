@@ -789,7 +789,10 @@ public:
 		 registered(false),
 		 on_reg_ack(NULL), on_reg_commit(NULL),
 		 session(NULL), session_item(this),
-		 register_tid(0) {}
+		 register_tid(0) {
+      // LingerOps break if you resend them
+      should_resend = false;
+    }
 
     // no copy!
     const LingerOp &operator=(const LingerOp& r);
