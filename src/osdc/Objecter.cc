@@ -267,17 +267,12 @@ void Objecter::send_linger(LingerOp *info)
     }
   }
 
-  if (info->register_tid) {
+  if (info->register_tid && ops.count(info->register_tid)) {
     // repeat send.  cancel old registeration op, if any.
-    if (ops.count(info->register_tid)) {
-      Op *o = ops[info->register_tid];
-      cancel_op(o);
-    }
-    info->register_tid = _op_submit(o);
-  } else {
-    // first send
-    info->register_tid = op_submit(o);
+    Op *o = ops[info->register_tid];
+    cancel_op(o);
   }
+  info->register_tid = op_submit(o);
 
   OSDSession *s = o->session;
   if (info->session != s) {
