@@ -1196,12 +1196,30 @@ int main(int argc, char **argv)
 	cerr << "could not unlink policy from user '" << owner.get_id() << "'" << std::endl;
 	return r;
       }
-    }
 
-    r = create_bucket(bucket_name.c_str(), uid_str, info.display_name, info.auid);
-    if (r < 0)
+      // now update the user for the bucket...
+      if (!info.display_name.empty()) {
+        policy.create_default(info.user_id, info.display_name);
+
+        // ...and encode the acl
+        aclbl.clear();
+        policy.encode(aclbl);
+
+        r = rgwstore->set_attr(NULL, obj, RGW_ATTR_ACL, aclbl);
+        if (r < 0)
+          return r;
+
+        r = rgw_add_bucket(info.user_id, bucket);
+        if (r < 0)
+          return r;
+      }
+    } else {
+      // the bucket seems not to exist, so we should probably create it...
+      r = create_bucket(bucket_name.c_str(), uid_str, info.display_name, info.auid);
+      if (r < 0)
         cerr << "error linking bucket to user: r=" << r << std::endl;
-    return -r;
+      return -r;
+    }
   }
 
   if (opt_cmd == OPT_BUCKET_UNLINK) {
