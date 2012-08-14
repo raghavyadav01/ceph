@@ -2001,6 +2001,13 @@ int main(int argc, const char **argv)
     cerr << "rados: you must give an action. Try --help" << std::endl;
     return 1;
   }
+
+  for (vector<const char*>::iterator it =  args.begin(); it != args.end(); it++) {
+    if ( (*it)[0] == '-') {
+      cerr << "rados: invalid argument passed " << *it << std::endl;
+      usage_exit(); }
+  }
+
   if ((strcmp(args[0], "import") == 0) || (strcmp(args[0], "export") == 0))
     return rados_tool_sync(opts, args);
   else

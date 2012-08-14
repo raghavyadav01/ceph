@@ -800,6 +800,7 @@ int main(int argc, char **argv)
   }
   else {
     const char *prev_cmd = NULL;
+    std::vector<const char*>::iterator prev = args.begin();
     for (std::vector<const char*>::iterator i = args.begin(); i != args.end(); ++i) {
       opt_cmd = get_cmd(*i, prev_cmd, &need_more);
       if (opt_cmd < 0) {
@@ -809,10 +810,23 @@ int main(int argc, char **argv)
       if (!need_more)
 	break;
       prev_cmd = *i;
+      prev = i;
     }
     if (opt_cmd == OPT_NO_CMD)
       return usage();
+
+    // erase the last two arguments which refer to commands
+    prev = args.erase(prev--);
+    args.erase(prev);
   }
+
+  if (args.size()) {
+    for (std::vector<const char*>::iterator i = args.begin(); i != args.end(); ++i)
+      cerr << "unrecognized argument " << args << std::endl;
+
+    return usage();
+  }
+
 
   // default to pretty json
   if (format.empty()) {
