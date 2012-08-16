@@ -744,11 +744,19 @@ void Monitor::sync_send_chunks(SyncEntity sync,
   sync->cancel_timeout();
 
   assert(sync->synchronizer.use_count() > 0);
+  assert(sync->synchronizer->has_next_chunk());
 
   MMonSync *msg = new MMonSync(MMonSync::OP_CHUNK);
-  sync->sync_update();
-  assert(sync->synchronizer->has_next_chunk());
+
   sync->synchronizer->get_chunk(msg->chunk_bl);
+  sync->sync_update();
+
+  if (sync->has_crc()) {
+    msg->flags |= MMonSync::FLAG_CRC;
+    msg->crc = sync->crc_get();
+    sync->crc_clear();
+  }
+
   if (!sync->synchronizer->has_next_chunk()) {
     msg->flags |= MMonSync::FLAG_LAST;
     sync->synchronizer.reset();
@@ -878,12 +886,37 @@ void Monitor::handle_sync_chunk(MMonSync *m)
     msg->flags |= MMonSync::FLAG_LAST;
     stop = true;
   }
-
-  m->put();
   messenger->send_message(msg, sync_provider->entity);
 
   store->apply_transaction(tx);
 
+  if (g_conf->mon_sync_debug && (m->flags & MMonSync::FLAG_CRC)) {
+    dout(10) << __func__ << " checking CRC" << dendl;
+    MonitorDBStore::Synchronizer sync;
+    if (m->flags & MMonSync::FLAG_LAST) {
+      dout(10) << __func__ << " checking CRC only for Paxos" << dendl;
+      string paxos_name("paxos");
+      sync = store->get_synchronizer(paxos_name);
+    } else {
+      dout(10) << __func__ << " checking CRC for all prefixes" << dendl;
+      set<string> prefixes = get_sync_targets_names();
+      pair<string,string> empty_key;
+      sync = store->get_synchronizer(empty_key, prefixes);
+    }
+
+    while (sync->has_next_chunk()) {
+      bufferlist bl;
+      sync->get_chunk(bl);
+    }
+    __u32 got_crc = sync->crc();
+    dout(10) << __func__ << " expected crc " << m->crc
+	     << " got " << got_crc << dendl;
+
+    assert(m->crc == got_crc);
+    dout(10) << __func__ << " CRC matches" << dendl;
+  }
+
+  m->put();
   if (stop)
     sync_stop();
 }

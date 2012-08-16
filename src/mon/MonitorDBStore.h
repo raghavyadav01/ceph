@@ -190,6 +190,7 @@ class MonitorDBStore
   protected:
     bool done;
     pair<string,string> last_key;
+    bufferlist crc_bl;
 
     StoreIteratorImpl() : done(false) { }
     virtual ~StoreIteratorImpl() { }
@@ -215,12 +216,24 @@ class MonitorDBStore
       tx.append(tmp);
       last_key.first = prefix;
       last_key.second = key;
+
+      if (g_conf->mon_sync_debug) {
+	::encode(prefix, crc_bl);
+	::encode(key, crc_bl);
+	::encode(value, crc_bl);
+      }
+
       return true;
     }
 
     virtual void _get_chunk(Transaction &tx) = 0;
 
   public:
+    __u32 crc() {
+      if (g_conf->mon_sync_debug)
+	return crc_bl.crc32c(0);
+      return 0;
+    }
     pair<string,string> get_last_key() {
       return last_key;
     };

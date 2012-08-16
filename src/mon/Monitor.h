@@ -252,16 +252,20 @@ private:
     version_t version;
     Context *timeout;
     pair<string,string> last_received_key;
-
     int sync_state;
     MonitorDBStore::Synchronizer synchronizer;
+
+    /* Should only be used for debugging purposes */
+    __u32 crc;
+    bool crc_available;
 
     SyncEntityImpl(entity_inst_t &entity, Monitor *mon)
       : entity(entity),
 	mon(mon),
 	version(0),
 	timeout(NULL),
-	sync_state(STATE_NONE)
+	sync_state(STATE_NONE),
+	crc_available(false)
     { }
 
     string get_state() {
@@ -296,6 +300,15 @@ private:
       assert(sync_state != STATE_NONE);
       assert(synchronizer.use_count() != 0);
 
+      if (!synchronizer->has_next_chunk()) {
+	crc_set(synchronizer->crc());
+	if (sync_state == STATE_WHOLE) {
+	  sync_state = STATE_PAXOS;
+	  string prefix("paxos");
+	  synchronizer = mon->store->get_synchronizer(prefix);
+	}
+      }
+#if 0
       if (sync_state == STATE_WHOLE) {
 	if (synchronizer->has_next_chunk())
 	  return;
@@ -303,9 +316,23 @@ private:
 	sync_state = STATE_PAXOS;
 	string prefix("paxos");
 	synchronizer = mon->store->get_synchronizer(prefix);
-      } else {
-	assert(synchronizer->has_next_chunk());
       }
+#endif
+    }
+
+    /* For debug purposes only */
+    bool has_crc() {
+      return (g_conf->mon_sync_debug && crc_available);
+    }
+    void crc_set(__u32 to_set) {
+      crc = to_set;
+      crc_available = true;
+    }
+    __u32 crc_get() {
+      return crc;
+    }
+    void crc_clear() {
+      crc_available = false;
     }
   };
   typedef std::tr1::shared_ptr< SyncEntityImpl > SyncEntity;
