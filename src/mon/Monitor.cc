@@ -208,6 +208,8 @@ void Monitor::do_admin_command(string command, ostream& ss)
     _mon_status(ss);
   else if (command == "quorum_status")
     _quorum_status(ss);
+  else if (command == "sync_status")
+    _sync_status(ss);
   else if (command.find("add_bootstrap_peer_hint") == 0)
     _add_bootstrap_peer_hint(command, ss);
   else
@@ -344,6 +346,9 @@ int Monitor::init()
   r = admin_socket->register_command("quorum_status", admin_hook,
 					 "show current quorum status");
   assert(r == 0);
+  r = admin_socket->register_command("sync_status", admin_hook,
+				     "show current synchronization status");
+  assert(r == 0);
   r = admin_socket->register_command("add_bootstrap_peer_hint", admin_hook,
 				     "add peer address as potential bootstrap peer for cluster bringup");
   assert(r == 0);
@@ -413,6 +418,7 @@ void Monitor::shutdown()
     AdminSocket* admin_socket = cct->get_admin_socket();
     admin_socket->unregister_command("mon_status");
     admin_socket->unregister_command("quorum_status");
+    admin_socket->unregister_command("sync_status");
     delete admin_hook;
     admin_hook = NULL;
   }
@@ -1492,6 +1498,55 @@ bool Monitor::_allowed_command(MonSession *s, const vector<string>& cmd)
   return false;
 }
 
+void Monitor::_sync_status(ostream& ss)
+{
+  JSONFormatter jf(true);
+  jf.open_object_section("sync_status");
+  jf.dump_string("state", get_state_name());
+  jf.dump_unsigned("paxos_version", paxos->get_version());
+
+  if (is_leader()) {
+    Mutex::Locker l(trim_lock);
+    jf.open_object_section("trim");
+    jf.dump_int("disabled", paxos->is_trim_disabled());
+    jf.dump_int("should_trim", paxos->should_trim());
+    if (trim_timeouts.size() > 0) {
+      jf.open_array_section("mons");
+      for (map<entity_inst_t,Context*>::iterator it = trim_timeouts.begin();
+	   it != trim_timeouts.end();
+	   ++it) {
+	jf.dump_stream("mon") << (*it).first;
+      }
+    }
+    jf.close_section();
+  }
+
+  if (sync_entities.size() > 0) {
+    jf.open_array_section("on_going");
+    for (map<entity_inst_t,SyncEntity>::iterator it = sync_entities.begin();
+	 it != sync_entities.end();
+	 ++it) {
+      jf.open_object_section("mon");
+      jf.dump_stream("addr") << (*it).first;
+      jf.dump_string("state", (*it).second->get_state());
+      jf.close_section();
+    }
+    jf.close_section();
+  }
+
+  if (is_synchronizing()) {
+    jf.open_object_section("leader");
+    jf.dump_stream("addr") << sync_leader->entity;
+    jf.close_section();
+
+    jf.open_object_section("provider");
+    jf.dump_stream("addr") << sync_provider->entity;
+    jf.close_section();
+  }
+  jf.close_section();
+  jf.flush(ss);
+}
+
 void Monitor::_quorum_status(ostream& ss)
 {
   JSONFormatter jf(true);
@@ -1530,12 +1585,9 @@ void Monitor::_mon_status(ostream& ss)
     jf.dump_string("mon", *p);
   jf.close_section();
 
-  if (is_slurping()) {
-    jf.dump_stream("slurp_source") << slurp_source;
-    jf.open_object_section("slurp_version");
-    for (map<string,version_t>::iterator p = slurp_versions.begin(); p != slurp_versions.end(); ++p)
-      jf.dump_int(p->first.c_str(), p->second);	  
-    jf.close_section();
+  if (is_synchronizing()) {
+    jf.dump_stream("sync_leader") << sync_leader->entity;
+    jf.dump_stream("sync_provider") << sync_provider->entity;
   }
 
   jf.open_object_section("monmap");
@@ -1700,6 +1752,17 @@ void Monitor::handle_command(MMonCommand *m)
       ss << "   osdmap " << osdmon()->osdmap << "\n";
       ss << "    pgmap " << pgmon()->pg_map << "\n";
       ss << "   mdsmap " << mdsmon()->mdsmap << "\n";
+      rs = ss.str();
+      r = 0;
+    }
+    if (m->cmd[0] == "sync_status") {
+      if (!access_r) {
+	r = -EACCES;
+	rs = "access denied";
+	goto out;
+      }
+      stringstream ss;
+      _sync_status(ss);
       rs = ss.str();
       r = 0;
     }
