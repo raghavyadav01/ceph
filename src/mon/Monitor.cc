@@ -612,12 +612,12 @@ void Monitor::handle_sync_start(MMonSync *m)
    * have an obligation of forwarding this message to leader, so the sender
    * can start synchronizing.
    */
-  if (!is_leader()) {
+  if (!is_leader() && (quorum.size() > 0)) {
     entity_inst_t leader = monmap->get_inst(get_leader());
-    dout(10) << __func__ << " forward " << *m
-	     << " to leader at " << leader << dendl;
     m->reply_to = m->get_source_inst();
     m->flags |= MMonSync::FLAG_REPLY_TO;
+    dout(10) << __func__ << " forward " << *m
+	     << " to leader at " << leader << dendl;
     assert(g_conf->mon_sync_provider_kill_at != 1);
     messenger->send_message(m, leader);
     assert(g_conf->mon_sync_provider_kill_at != 2);
@@ -650,7 +650,8 @@ void Monitor::handle_sync_heartbeat(MMonSync *m)
 {
   dout(10) << __func__ << " " << *m << dendl;
 
-  assert(is_leader());
+  if (quorum.size())
+    assert(is_leader());
 
   entity_inst_t other = m->get_source_inst();
   if (trim_timeouts.count(other) == 0) {
@@ -675,7 +676,8 @@ void Monitor::sync_finish(entity_inst_t &entity)
 {
   dout(10) << __func__ << " entity(" << entity << ")" << dendl;
 
-  assert(is_leader());
+  if (quorum.size())
+    assert(is_leader());
 
   Mutex::Locker l(trim_lock);
 
@@ -692,7 +694,8 @@ void Monitor::handle_sync_finish(MMonSync *m)
 {
   dout(10) << __func__ << " " << *m << dendl;
 
-  assert(is_leader());
+  if (quorum.size())
+    assert(is_leader());
 
   entity_inst_t other = m->get_source_inst();
 
@@ -872,7 +875,6 @@ void Monitor::handle_sync_heartbeat_reply(MMonSync *m)
   entity_inst_t other = m->get_source_inst();
   assert(state == STATE_SYNCHRONIZING);
 
-  assert(other == monmap->get_inst(get_leader()));
   assert(sync_leader.get() != NULL);
   assert(sync_leader->entity == other);
 
@@ -890,7 +892,6 @@ void Monitor::handle_sync_chunk(MMonSync *m)
   assert(state == STATE_SYNCHRONIZING);
 
   assert(sync_leader.get() != NULL);
-  assert(sync_leader->entity == monmap->get_inst(get_leader()));
 
   assert(sync_provider.get() != NULL);
   assert(other == sync_provider->entity);
@@ -959,7 +960,7 @@ void Monitor::sync_stop()
   sync_provider->cancel_timeout();
   sync_provider.reset();
 
-  entity_inst_t leader = monmap->get_inst(get_leader());
+  entity_inst_t leader = sync_leader->entity;
 
   sync_leader->set_timeout(new C_SyncFinishReplyTimeout(this),
 			   g_conf->mon_sync_timeout);
@@ -973,8 +974,7 @@ void Monitor::sync_stop()
 void Monitor::handle_sync_finish_reply(MMonSync *m)
 {
   dout(10) << __func__ << " " << *m << dendl;
-  entity_inst_t leader = monmap->get_inst(get_leader());
-  assert(m->get_source_inst() == leader);
+  assert(m->get_source_inst() == sync_leader->entity);
   sync_leader->cancel_timeout();
   sync_leader.reset();
 
