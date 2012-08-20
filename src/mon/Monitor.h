@@ -195,6 +195,7 @@ private:
    */
   set<string> get_sync_targets_names();
   void handle_sync(MMonSync *m);
+  void handle_sync_abort(MMonSync *m);
   void reset_sync();
   /**
    * @defgroup Leader-specific
@@ -231,7 +232,10 @@ private:
   void handle_sync_start(MMonSync *m);
   void handle_sync_heartbeat(MMonSync *m);
   void handle_sync_finish(MMonSync *m);
-  void sync_finish(entity_inst_t &entity);
+  void sync_finish(entity_inst_t &entity, bool abort = false);
+  void sync_finish_abort(entity_inst_t &entity) {
+    sync_finish(entity, true);
+  }
   /**
    * @} // Leader-specific
    */
@@ -356,6 +360,7 @@ private:
 
   map<entity_inst_t, SyncEntity> sync_entities;
 
+  void sync_provider_cleanup(entity_inst_t &entity);
   void handle_sync_start_chunks(MMonSync *m);
   void handle_sync_heartbeat_reply(MMonSync *m);
   void handle_sync_chunk_reply(MMonSync *m);
@@ -428,6 +433,8 @@ private:
   SyncEntity sync_leader;
   SyncEntity sync_provider;
 
+  void sync_requester_cleanup();
+  void sync_requester_abort();
   void sync_start(entity_inst_t &entity);
   void handle_sync_start_reply(MMonSync *m);
   void handle_sync_chunk(MMonSync *m);

@@ -651,10 +651,16 @@ void Monitor::handle_sync_heartbeat(MMonSync *m)
 {
   dout(10) << __func__ << " " << *m << dendl;
 
-  if (quorum.size())
-    assert(is_leader());
-
   entity_inst_t other = m->get_source_inst();
+  if (!is_leader() && (quorum.size() > 0)
+      && (trim_timeouts.count(other) > 0)) {
+    // we must have been the leader before, but we lost leadership to
+    // someone else.
+    sync_finish_abort(other);
+    m->put();
+    return;
+  }
+
   if (trim_timeouts.count(other) == 0) {
     dout(5) << __func__ << " received heartbeat from " << other
 	    << " not on the trim map; have it timed out?" << dendl;
@@ -673,17 +679,31 @@ void Monitor::handle_sync_heartbeat(MMonSync *m)
   m->put();
 }
 
-void Monitor::sync_finish(entity_inst_t &entity)
+void Monitor::sync_finish(entity_inst_t &entity, bool abort)
 {
   dout(10) << __func__ << " entity(" << entity << ")" << dendl;
 
-  if (quorum.size())
-    assert(is_leader());
-
   Mutex::Locker l(trim_lock);
 
-  if (trim_timeouts.count(entity) > 0)
+  if (trim_timeouts.count(entity) > 0) {
+    if (trim_timeouts[entity] != NULL)
+      timer.cancel_event(trim_timeouts[entity]);
+
     trim_timeouts.erase(entity);
+
+    if (abort) {
+      MMonSync *m = new MMonSync(MMonSync::OP_ABORT);
+      messenger->send_message(m, entity);
+      return;
+    }
+  }
+
+  // we may have been the leader, but by now we may no longer be.
+  // this can happen when the we sync'ed a monitor that became the
+  // leader, or that same monitor simply came back to life and got
+  // elected as the new leader.
+  if (!is_leader())
+    return;
 
   if (paxos->is_trim_disabled() && (trim_timeouts.size() == 0)) {
     trim_enable_timer = new C_TrimEnable(this);
@@ -695,8 +715,15 @@ void Monitor::handle_sync_finish(MMonSync *m)
 {
   dout(10) << __func__ << " " << *m << dendl;
 
-  if (quorum.size())
-    assert(is_leader());
+  // We may no longer the leader. In such case, we should just inform the
+  // other monitor that he should abort his sync. However, it appears that
+  // his sync has finished, so there is no use in scraping the whole thing
+  // now. Therefore, just go along and acknowledge.
+
+  if (!is_leader()) {
+    dout(10) << __func__ << " We are no longer the leader; reply nonetheless"
+	     << dendl;
+  }
 
   entity_inst_t other = m->get_source_inst();
 
@@ -712,6 +739,15 @@ void Monitor::handle_sync_finish(MMonSync *m)
 // end of leader
 
 // synchronization provider
+void Monitor::sync_provider_cleanup(entity_inst_t &entity)
+{
+  dout(10) << __func__ << " " << entity << dendl;
+  if (sync_entities.count(entity) > 0) {
+    sync_entities[entity]->cancel_timeout();
+    sync_entities.erase(entity);
+  }
+}
+
 void Monitor::handle_sync_start_chunks(MMonSync *m)
 {
   dout(10) << __func__ << " " << *m << dendl;
@@ -746,8 +782,7 @@ void Monitor::handle_sync_chunk_reply(MMonSync *m)
 
   if (m->flags & MMonSync::FLAG_LAST) {
     // they acked the last chunk. Clean up.
-    sync_entities[other]->cancel_timeout();
-    sync_entities.erase(other);
+    sync_provider_cleanup(other);
     m->put();
     return;
   }
@@ -793,6 +828,31 @@ void Monitor::sync_send_chunks(SyncEntity sync,
 
 // end of synchronization provider)
 
+void Monitor::sync_requester_abort()
+{
+  assert(state == STATE_SYNCHRONIZING);
+
+  if (sync_leader.get() != NULL) {
+    sync_leader->cancel_timeout();
+    sync_leader.reset();
+  }
+
+  if (sync_provider.get() != NULL) {
+    sync_provider->cancel_timeout();
+
+    MMonSync *msg = new MMonSync(MMonSync::OP_ABORT);
+    messenger->send_message(msg, sync_provider->entity);
+
+    sync_provider.reset();
+  }
+
+  // Given that we are explicitely aborting the whole sync process, we should
+  // play it safe and clear the store.
+  set<string> targets = get_sync_targets_names();
+  store->clear(targets);
+
+  bootstrap();
+}
 /**
  * Start Sync process
  *
@@ -986,6 +1046,44 @@ void Monitor::handle_sync_finish_reply(MMonSync *m)
   bootstrap();
 }
 
+void Monitor::handle_sync_abort(MMonSync *m)
+{
+  dout(10) << __func__ << " " << *m << dendl;
+  /* This function's responsabilities are manifold, and they depend on
+   * who we (the monitor) are and what is our role in the sync.
+   *
+   * If we are the sync requester (i.e., if we are synchronizing), it
+   * means that we *must* abort the current sync and bootstrap. This may
+   * be required if there was a leader change and we are talking to the
+   * wrong leader, which makes continuing with the current sync way too
+   * risky, given that a Paxos trim may be underway and we certainly incur
+   * in the chance of ending up with an inconsistent store state.
+   *
+   * If we are the sync provider, it means that the requester wants to
+   * abort his sync, either because he lost connectivity to the leader
+   * (i.e., his heartbeat timeout was triggered) or he became aware of a
+   * leader change.
+   *
+   * As a leader, we should never receive such a message though, unless we
+   * have just won an election, in which case we should have been a sync
+   * provider before. In such a case, we should behave as if we were a sync
+   * provider and clean up the requester's state.
+   */
+
+  entity_inst_t other = m->get_source_inst();
+  if (state == STATE_SYNCHRONIZING) {
+    // If we are in 'STATE_SYNCHRONIZING' then we must be a sync requester
+    sync_requester_abort();
+  } else if (sync_entities.count(other) > 0) {
+    // Otherwise we must be a provider, or have been a provider, and we should
+    // // clean up the requester's state if it still exists.
+    sync_provider_cleanup(other);
+  } else
+    assert(0 == "This should never happen");
+
+  m->put();
+}
+
 void Monitor::handle_sync(MMonSync *m)
 {
   dout(10) << __func__ << " " << *m << dendl;
@@ -1016,6 +1114,9 @@ void Monitor::handle_sync(MMonSync *m)
     break;
   case MMonSync::OP_FINISH_REPLY:
     handle_sync_finish_reply(m);
+    break;
+  case MMonSync::OP_ABORT:
+    handle_sync_abort(m);
     break;
   default:
     dout(0) << __func__ << " unknown op " << m->op << dendl;
