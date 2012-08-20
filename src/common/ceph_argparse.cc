@@ -117,7 +117,10 @@ bool parse_ip_port_vec(const char *s, vector<entity_addr_t>& vec)
 CephInitParameters::CephInitParameters(uint32_t module_type_)
   : module_type(module_type_)
 {
-  name.set(module_type, "admin");
+  if (module_type == CEPH_ENTITY_TYPE_CLIENT)
+    name.set(module_type, "admin");
+  else
+    name.set(module_type, "");
 }
 
 static void dashes_to_underscores(const char *input, char *output)
