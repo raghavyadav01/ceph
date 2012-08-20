@@ -1046,7 +1046,7 @@ void Monitor::reset_probe_timeout()
 void Monitor::probe_timeout(int r)
 {
   dout(4) << "probe_timeout " << probe_timeout_event << dendl;
-  assert(is_probing() || is_slurping());
+  assert(is_probing() || is_synchronizing());
   assert(probe_timeout_event);
   probe_timeout_event = NULL;
   bootstrap();
@@ -1168,20 +1168,17 @@ void Monitor::handle_probe_reply(MMonProbe *m)
   if (m->quorum.size()) {
     dout(10) << " existing quorum " << m->quorum << dendl;
 
+    assert(paxos != NULL);
     // do i need to catch up?
     bool ok = true;
     for (map<string,version_t>::iterator p = m->paxos_versions.begin();
 	 p != m->paxos_versions.end();
 	 ++p) {
-      if (!paxos) {
-	dout(0) << " peer has paxos machine " << p->first << " but i don't... weird" << dendl;
-	continue;  // weird!
-      }
-      if (paxos->is_slurping()) {
-        dout(10) << " My paxos machine " << p->first
-                 << " is currently slurping, so that will continue. Peer has v "
-                 << p->second << dendl;
-        ok = false;
+      if (is_synchronizing()) {
+        dout(10) << "We are currently synchronizing, so that will continue."
+		 << " Peer has v " << p->second << dendl;
+        m->put();
+	return;
       } else if (paxos->get_version() + g_conf->paxos_max_join_drift < p->second) {
 	dout(10) << " peer paxos machine " << p->first << " v " << p->second
 		 << " vs my v " << paxos->get_version()
@@ -1206,11 +1203,6 @@ void Monitor::handle_probe_reply(MMonProbe *m)
 				monmap->get_inst(*m->quorum.begin()));
       }
     } else {
-/*
-      slurp_source = m->get_source_inst();
-      slurp_versions = m->paxos_versions;
-      slurp();
-*/
       entity_inst_t source = m->get_source_inst();
       sync_start(source);
     }
@@ -2321,7 +2313,7 @@ bool Monitor::_ms_dispatch(Message *m)
 	dout(0) << "MMonElection received from entity without enough caps!"
 		<< s->caps << dendl;
       }
-      if (!is_probing() && !is_slurping()) {
+      if (!is_probing() && !is_synchronizing()) {
 	elector.dispatch(m);
       } else {
 	m->put();
