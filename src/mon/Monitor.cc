@@ -614,12 +614,13 @@ void Monitor::handle_sync_start(MMonSync *m)
    */
   if (!is_leader() && (quorum.size() > 0)) {
     entity_inst_t leader = monmap->get_inst(get_leader());
-    m->reply_to = m->get_source_inst();
-    m->flags |= MMonSync::FLAG_REPLY_TO;
+    MMonSync *msg = new MMonSync(m);
+    msg->reply_to = m->get_source_inst();
+    msg->flags |= MMonSync::FLAG_REPLY_TO;
     dout(10) << __func__ << " forward " << *m
 	     << " to leader at " << leader << dendl;
     assert(g_conf->mon_sync_provider_kill_at != 1);
-    messenger->send_message(m, leader);
+    messenger->send_message(msg, leader);
     assert(g_conf->mon_sync_provider_kill_at != 2);
     return;
   }
