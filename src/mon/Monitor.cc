@@ -618,13 +618,17 @@ void Monitor::handle_sync_start(MMonSync *m)
 	     << " to leader at " << leader << dendl;
     m->reply_to = m->get_source_inst();
     m->flags |= MMonSync::FLAG_REPLY_TO;
+    assert(g_conf->mon_sync_provider_kill_at != 1);
     messenger->send_message(m, leader);
+    assert(g_conf->mon_sync_provider_kill_at != 2);
     return;
   }
 
   Mutex::Locker l(trim_lock);
   entity_inst_t other =
     (m->flags & MMonSync::FLAG_REPLY_TO ? m->reply_to : m->get_source_inst());
+
+  assert(g_conf->mon_sync_leader_kill_at != 1);
 
   MMonSync *msg = new MMonSync(MMonSync::OP_START_REPLY);
 
@@ -638,6 +642,8 @@ void Monitor::handle_sync_start(MMonSync *m)
   }
   messenger->send_message(msg, other);
   m->put();
+
+  assert(g_conf->mon_sync_leader_kill_at != 2);
 }
 
 void Monitor::handle_sync_heartbeat(MMonSync *m)
@@ -657,7 +663,11 @@ void Monitor::handle_sync_heartbeat(MMonSync *m)
     timer.cancel_event(trim_timeouts[other]);
   trim_timeouts[other] = new C_TrimTimeout(this, other);
   timer.add_event_after(g_conf->mon_sync_trim_timeout, trim_timeouts[other]);
+
+  assert(g_conf->mon_sync_leader_kill_at != 3);
   sync_send_heartbeat(other, true);
+  assert(g_conf->mon_sync_leader_kill_at != 4);
+
   m->put();
 }
 
@@ -687,7 +697,9 @@ void Monitor::handle_sync_finish(MMonSync *m)
   entity_inst_t other = m->get_source_inst();
 
   MMonSync *msg = new MMonSync(MMonSync::OP_FINISH_REPLY);
+  assert(g_conf->mon_sync_leader_kill_at != 5);
   messenger->send_message(msg, other);
+  assert(g_conf->mon_sync_leader_kill_at != 6);
 
   sync_finish(other);
   m->put();
@@ -770,7 +782,9 @@ void Monitor::sync_send_chunks(SyncEntity sync,
 
   sync->set_timeout(new C_SyncTimeout(this, sync->entity),
 		    g_conf->mon_sync_timeout);
+  assert(g_conf->mon_sync_provider_kill_at != 3);
   messenger->send_message(msg, sync->entity);
+  assert(g_conf->mon_sync_provider_kill_at != 4);
 }
 
 // end of synchronization provider)
@@ -808,6 +822,7 @@ void Monitor::sync_start(entity_inst_t &other)
 
   MMonSync *m = new MMonSync(MMonSync::OP_START);
   messenger->send_message(m, other);
+  assert(g_conf->mon_sync_requester_kill_at != 1);
 }
 
 void Monitor::handle_sync_start_reply(MMonSync *m)
@@ -831,12 +846,18 @@ void Monitor::handle_sync_start_reply(MMonSync *m)
 
   sync_leader->set_timeout(new C_HeartbeatTimeout(this, sync_leader->entity),
 			   g_conf->mon_sync_heartbeat_timeout);
+
+  assert(g_conf->mon_sync_requester_kill_at != 2);
   sync_send_heartbeat(sync_leader->entity);
+  assert(g_conf->mon_sync_requester_kill_at != 3);
 
   sync_provider->set_timeout(new C_SyncTimeout(this, sync_provider->entity),
 			     g_conf->mon_sync_timeout);
   MMonSync *msg = new MMonSync(MMonSync::OP_START_CHUNKS);
+
+  assert(g_conf->mon_sync_requester_kill_at != 4);
   messenger->send_message(msg, sync_provider->entity);
+  assert(g_conf->mon_sync_requester_kill_at != 5);
 }
 
 void Monitor::handle_sync_heartbeat_reply(MMonSync *m)
@@ -875,7 +896,9 @@ void Monitor::handle_sync_chunk(MMonSync *m)
   assert(other == sync_provider->entity);
 
   sync_provider->cancel_timeout();
+  assert(g_conf->mon_sync_requester_kill_at != 6);
   sync_send_heartbeat(sync_leader->entity);
+  assert(g_conf->mon_sync_requester_kill_at != 7);
 
   MonitorDBStore::Transaction tx;
   tx.append_from_encoded(m->chunk_bl);
@@ -892,6 +915,7 @@ void Monitor::handle_sync_chunk(MMonSync *m)
     msg->flags |= MMonSync::FLAG_LAST;
     stop = true;
   }
+  assert(g_conf->mon_sync_requester_kill_at != 8);
   messenger->send_message(msg, sync_provider->entity);
 
   store->apply_transaction(tx);
@@ -941,7 +965,9 @@ void Monitor::sync_stop()
 			   g_conf->mon_sync_timeout);
 
   MMonSync *msg = new MMonSync(MMonSync::OP_FINISH);
+  assert(g_conf->mon_sync_requester_kill_at != 9);
   messenger->send_message(msg, leader);
+  assert(g_conf->mon_sync_requester_kill_at != 10);
 }
 
 void Monitor::handle_sync_finish_reply(MMonSync *m)
@@ -953,6 +979,8 @@ void Monitor::handle_sync_finish_reply(MMonSync *m)
   sync_leader.reset();
 
   init_paxos();
+
+  assert(g_conf->mon_sync_requester_kill_at != 11);
 
   bootstrap();
 }
@@ -1543,6 +1571,14 @@ void Monitor::_sync_status(ostream& ss)
     jf.dump_stream("addr") << sync_provider->entity;
     jf.close_section();
   }
+
+  if (g_conf->mon_sync_leader_kill_at > 0)
+    jf.dump_int("leader_kill_at", g_conf->mon_sync_leader_kill_at);
+  if (g_conf->mon_sync_provider_kill_at > 0)
+    jf.dump_int("provider_kill_at", g_conf->mon_sync_provider_kill_at);
+  if (g_conf->mon_sync_requester_kill_at > 0)
+    jf.dump_int("requester_kill_at", g_conf->mon_sync_requester_kill_at);
+
   jf.close_section();
   jf.flush(ss);
 }
