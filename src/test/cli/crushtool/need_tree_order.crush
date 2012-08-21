@@ -11,7 +11,7 @@ type 1 host
 type 2 rack
 type 3 root
 
-# buckets
+# nodes
 host host0 {
 	id -1		# do not change unnecessarily
 	# weight 1.000

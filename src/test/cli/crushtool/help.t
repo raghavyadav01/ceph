@@ -27,7 +27,7 @@
      -i mapfn --reweight-item name weight
                            reweight a given item (and adjust ancestor
                            weights as needed)
-     -i mapfn --reweight   recalculate all bucket weights
+     -i mapfn --reweight   recalculate all node weights
      --show-utilization    show OSD usage
      --show utilization-all
                            include zero weight items

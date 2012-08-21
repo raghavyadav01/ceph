@@ -17,7 +17,7 @@ type 0 osd
 type 1 host
 type 2 cluster
 
-# buckets
+# nodes
 host host0 {
 	id -2		# do not change unnecessarily
 	# weight 3.000
