@@ -114,7 +114,7 @@ void usage()
   cout << "   -i mapfn --reweight-item name weight\n";
   cout << "                         reweight a given item (and adjust ancestor\n"
        << "                         weights as needed)\n";
-  cout << "   -i mapfn --reweight   recalculate all bucket weights\n";
+  cout << "   -i mapfn --reweight   recalculate all node weights\n";
   cout << "   --show-utilization    show OSD usage\n";
   cout << "   --show utilization-all\n";
   cout << "                         include zero weight items\n";
@@ -358,7 +358,7 @@ int main(int argc, const char **argv)
         exit(EXIT_FAILURE);
       }
       tester.set_device_down_ratio(y);
-    } else if (ceph_argparse_withfloat(args, i, &y, &err, "--mark-down-bucket-ratio", (char*)NULL)) {
+    } else if (ceph_argparse_withfloat(args, i, &y, &err, "--mark-down-node-ratio", (char*)NULL)) {
       if (!err.str().empty()) {
         cerr << err.str() << std::endl;
         exit(EXIT_FAILURE);
@@ -395,7 +395,7 @@ int main(int argc, const char **argv)
   }
   else {
     if ((args.size() % 3) != 0U) {
-      cerr << "layers must be specified with 3-tuples of (name, buckettype, size)"
+      cerr << "layers must be specified with 3-tuples of (name, nodetype, size)"
     	   << std::endl;
       usage();
     }
@@ -488,7 +488,7 @@ int main(int argc, const char **argv)
 
       dout(0) << "layer " << type
 	      << "  " << l.name
-	      << "  bucket type " << l.buckettype
+	      << "  node type " << l.buckettype
 	      << "  " << l.size 
 	      << dendl;
 
@@ -501,7 +501,7 @@ int main(int argc, const char **argv)
 	  break;
 	}
       if (buckettype < 0) {
-	cerr << "unknown bucket type '" << l.buckettype << "'" << std::endl << std::endl;
+	cerr << "unknown node type '" << l.buckettype << "'" << std::endl << std::endl;
 	usage();
       }
 
@@ -548,7 +548,7 @@ int main(int argc, const char **argv)
 	snprintf(name, sizeof(name), format, i);
 	crush.set_item_name(id, name);
 
-	dout(0) << " in bucket " << id << " '" << name << "' size " << j << " weight " << weight << dendl;
+	dout(0) << " in node " << id << " '" << name << "' size " << j << " weight " << weight << dendl;
 
 	cur_items.push_back(id);
 	cur_weights.push_back(weight);

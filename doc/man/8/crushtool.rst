@@ -70,11 +70,11 @@ The first element is the name for the elements in the layer
 (e.g. "rack"). Each element's name will be append a number to the
 provided name.
 
-The second component is the type of CRUSH bucket.
+The second component is the type of CRUSH node.
 
-The third component is the maximum size of the bucket. If the size is
-0, a single bucket will be generated that includes everything in the
-preceding layer.
+The third component is the maximum size (i.e., number of children) of
+the node. If the size is 0, a single node will be generated that
+includes everything in the preceding layer.
 
 
 Example

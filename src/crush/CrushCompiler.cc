@@ -36,7 +36,7 @@ static void print_item_name(ostream& out, int t, CrushWrapper &crush)
   else if (t >= 0)
     out << "device" << t;
   else
-    out << "bucket" << (-1-t);
+    out << "node" << (-1-t);
 }
 
 static void print_rule_name(ostream& out, int t, CrushWrapper &crush)
@@ -77,7 +77,7 @@ int CrushCompiler::decompile_bucket_impl(int i, ostream &out)
   bool dopos = false;
   switch (alg) {
   case CRUSH_BUCKET_UNIFORM:
-    out << "\t# do not change bucket size (" << n << ") unnecessarily";
+    out << "\t# do not change node size (" << n << ") unnecessarily";
     dopos = true;
     break;
   case CRUSH_BUCKET_LIST:
@@ -142,11 +142,11 @@ int CrushCompiler::decompile_bucket(int cur,
   }
   else if (c->second == DCB_STATE_IN_PROGRESS) {
     err << "decompile_crush_bucket: logic error: tried to decompile "
-	"a bucket that is already being decompiled" << std::endl;
+	"a node that is already being decompiled" << std::endl;
     return -EBADE;
   }
   else {
-    err << "decompile_crush_bucket: logic error: illegal bucket state! "
+    err << "decompile_crush_bucket: logic error: illegal node state! "
 	 << c->second << std::endl;
     return -EBADE;
   }
@@ -161,14 +161,14 @@ int CrushCompiler::decompile_bucket(int cur,
 	return ret;
     }
     else if (d->second == DCB_STATE_IN_PROGRESS) {
-      err << "decompile_crush_bucket: error: while trying to output bucket "
-	   << cur << ", we found out that it contains one of the buckets that "
-	   << "contain it. This is not allowed. The buckets must form a "
+      err << "decompile_crush_bucket: error: while trying to output node "
+	   << cur << ", we found out that it contains one of the nodes that "
+	   << "contain it. This is not allowed. The nodes must form a "
 	   <<  "directed acyclic graph." << std::endl;
       return -EINVAL;
     }
     else if (d->second != DCB_STATE_DONE) {
-      err << "decompile_crush_bucket: logic error: illegal bucket state "
+      err << "decompile_crush_bucket: logic error: illegal node state "
 	   << d->second << std::endl;
       return -EBADE;
     }
@@ -209,7 +209,7 @@ int CrushCompiler::decompile(ostream &out)
     out << "type " << i << " " << name << "\n";
   }
 
-  out << "\n# buckets\n";
+  out << "\n# nodes\n";
   std::map<int, dcb_state_t> dcb_states;
   for (int bucket = -1; bucket > -1-crush.get_max_buckets(); --bucket) {
     int ret = decompile_bucket(bucket, dcb_states, out);
@@ -370,14 +370,14 @@ int CrushCompiler::parse_bucket(iter_t const& i)
 {
   string tname = string_node(i->children[0]);
   if (!type_id.count(tname)) {
-    err << "bucket type '" << tname << "' is not defined" << std::endl;
+    err << "node type '" << tname << "' is not defined" << std::endl;
     return -1;
   }
   int type = type_id[tname];
 
   string name = string_node(i->children[1]);
   if (item_id.count(name)) {
-    err << "bucket or device '" << name << "' is already defined" << std::endl;
+    err << "node or device '" << name << "' is already defined" << std::endl;
     return -1;
   }
 
@@ -423,7 +423,7 @@ int CrushCompiler::parse_bucket(iter_t const& i)
 	if (tag == "pos") {
 	  int pos = int_node(sub->children[q]);
 	  if (used_items.count(pos)) {
-	    err << "item '" << string_node(sub->children[1]) << "' in bucket '" << name << "' has explicit pos " << pos << ", which is occupied" << std::endl;
+	    err << "item '" << string_node(sub->children[1]) << "' in node '" << name << "' has explicit pos " << pos << ", which is occupied" << std::endl;
 	    return -1;
 	  }
 	  used_items.insert(pos);
@@ -450,7 +450,7 @@ int CrushCompiler::parse_bucket(iter_t const& i)
 
       string iname = string_node(sub->children[1]);
       if (!item_id.count(iname)) {
-	err << "item '" << iname << "' in bucket '" << name << "' is not defined" << std::endl;
+	err << "item '" << iname << "' in node '" << name << "' is not defined" << std::endl;
 	return -1;
       }
       int itemid = item_id[iname];
@@ -469,7 +469,7 @@ int CrushCompiler::parse_bucket(iter_t const& i)
 	    return -ERANGE;
 	  }
 	  else if (weight > CRUSH_MAX_BUCKET_WEIGHT && itemid < 0) {
-	    err << "bucket weight limited to " << CRUSH_MAX_BUCKET_WEIGHT / 0x10000
+	    err << "node weight limited to " << CRUSH_MAX_BUCKET_WEIGHT / 0x10000
 	        << " to prevent overflow" << std::endl;
 	    return -ERANGE;
 	  }
@@ -486,16 +486,16 @@ int CrushCompiler::parse_bucket(iter_t const& i)
 	  uniform_weight = weight;
 	} else {
 	  if (uniform_weight != weight) {
-	    err << "item '" << iname << "' in uniform bucket '" << name << "' has weight " << weight
+	    err << "item '" << iname << "' in uniform node '" << name << "' has weight " << weight
 		<< " but previous item(s) have weight " << (float)uniform_weight/(float)0x10000
-		<< "; uniform bucket items must all have identical weights." << std::endl;
+		<< "; uniform node items must all have identical weights." << std::endl;
 	    return -1;
 	  }
 	}
       }
 
       if (pos >= size) {
-	err << "item '" << iname << "' in bucket '" << name << "' has pos " << pos << " >= size " << size << std::endl;
+	err << "item '" << iname << "' in node '" << name << "' has pos " << pos << " >= size " << size << std::endl;
 	return -1;
       }
       if (pos < 0) {
@@ -507,7 +507,7 @@ int CrushCompiler::parse_bucket(iter_t const& i)
       weights[pos] = weight;
 
       if (crush_addition_is_unsafe(bucketweight, weight)) {
-        err << "oh no! our bucket weights are overflowing all over the place, better lower the item weights" << std::endl;
+        err << "oh no! our node weights are overflowing all over the place, better lower the item weights" << std::endl;
         return -ERANGE;
       }
 
@@ -520,7 +520,7 @@ int CrushCompiler::parse_bucket(iter_t const& i)
     //err << "assigned id " << id << std::endl;
   }
 
-  if (verbose) err << "bucket " << name << " (" << id << ") " << size << " items and weight "
+  if (verbose) err << "node " << name << " (" << id << ") " << size << " items and weight "
 		   << (float)bucketweight / (float)0x10000 << std::endl;
   id_item[id] = name;
   item_id[name] = id;

@@ -62,20 +62,20 @@ the device will still be placed in host ``hostfoo`` at its current
 location (rack ``rackbar`` and pool ``default``).
 
 
-Moving a bucket to a different position in the hierarchy
-========================================================
+Moving a node to a different position in the hierarchy
+======================================================
 
-To move an existing bucket to a different position in the hierarchy,
-identify the bucket to move by name and specify the new location in
+To move an existing node to a different position in the hierarchy,
+identify the node  to move by name and specify the new location in
 the same fashion as with ``osd crush set ...``::
 
-  $ ceph osd crush move <bucket name> [<loc> [<loc2> ...]]
+  $ ceph osd crush move <node name> [<loc> [<loc2> ...]]
 
 where
 
-  * ``name`` is the name of the bucket to move.  (To move a device,
+  * ``name`` is the name of the node to move.  (To move a device,
     see :ref:`adjusting-crush-set`.)
-  * ``loc`` is a list of ``what=where`` pairs indicating where the bucket should
+  * ``loc`` is a list of ``what=where`` pairs indicating where the node should
     be moved.  See :ref:`adjusting-crush-set`.
 
 
@@ -122,7 +122,7 @@ Impact of legacy values
 
 The legacy values result in several misbehaviors:
 
- * For hiearchies with a small number of devices in the leaf buckets,
+ * For hiearchies with a small number of devices in the leaf nodes,
    some PGs map to fewer than the desired number of replicas.  This
    commonly happens for hiearchies with "host" nodes with a small
    number (1-3) of OSDs nested beneath each one.
