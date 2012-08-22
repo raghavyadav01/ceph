@@ -663,7 +663,7 @@ void Monitor::handle_sync_heartbeat(MMonSync *m)
 
   if (trim_timeouts.count(other) == 0) {
     dout(5) << __func__ << " received heartbeat from " << other
-	    << " not on the trim map; have it timed out?" << dendl;
+	    << " not on the trim map; )ave it timed out?" << dendl;
     return;
   }
 
@@ -693,7 +693,9 @@ void Monitor::sync_finish(entity_inst_t &entity, bool abort)
 
     if (abort) {
       MMonSync *m = new MMonSync(MMonSync::OP_ABORT);
+      assert(g_conf->mon_sync_leader_kill_at != 5);
       messenger->send_message(m, entity);
+      assert(g_conf->mon_sync_leader_kill_at != 6);
       return;
     }
   }
@@ -728,9 +730,9 @@ void Monitor::handle_sync_finish(MMonSync *m)
   entity_inst_t other = m->get_source_inst();
 
   MMonSync *msg = new MMonSync(MMonSync::OP_FINISH_REPLY);
-  assert(g_conf->mon_sync_leader_kill_at != 5);
+  assert(g_conf->mon_sync_leader_kill_at != 7);
   messenger->send_message(msg, other);
-  assert(g_conf->mon_sync_leader_kill_at != 6);
+  assert(g_conf->mon_sync_leader_kill_at != 8);
 
   sync_finish(other);
   m->put();
