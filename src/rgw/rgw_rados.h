@@ -282,7 +282,8 @@ protected:
 
 public:
   RGWRados() : lock("rados_timer_lock"), timer(NULL), num_watchers(0), watchers(NULL), watch_handles(NULL),
-               bucket_id_lock("rados_bucket_id"), max_bucket_id(0) {}
+               bucket_id_lock("rados_bucket_id"), max_bucket_id(0),
+	       cct(NULL) {}
   virtual ~RGWRados() {}
 
   void tick();
