@@ -5875,7 +5875,6 @@ void Server::_rename_apply(MDRequest *mdr, CDentry *srcdn, CDentry *destdn, CDen
   // src
   if (srcdn->is_auth()) {
     srcdn->mark_dirty(mdr->more()->pvmap[srcdn], mdr->ls);
-    srcdnl = srcdn->pop_projected_linkage();
   }
   
   // apply remaining projected inodes (nested)
