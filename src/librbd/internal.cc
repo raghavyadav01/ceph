@@ -1841,7 +1841,7 @@ reprotect_and_return_err:
     ldout(ictx->cct, 20) << "finished flattening" << dendl;
 
   err:
-    delete buf;
+    delete[] buf;
     return r;
   }
 
